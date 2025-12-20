@@ -10,10 +10,11 @@ Applications can push data to this sidecar, which will handle:
 """
 
 import os
+import re
 import duckdb
 from datetime import datetime
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from typing import List, Dict, Any, Optional
 import json
 
@@ -25,6 +26,43 @@ S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY", "admin")
 S3_SECRET_KEY = os.getenv("S3_SECRET_KEY", "password")
 S3_BUCKET = os.getenv("S3_BUCKET", "lake-data")
 S3_REGION = os.getenv("S3_REGION", "us-east-1")
+
+# --- SECURITY ---
+def sanitize_table_name(table_name: str) -> str:
+    """
+    Validate and sanitize table name to prevent SQL injection.
+    Only allows alphanumeric characters and underscores.
+    """
+    if not table_name:
+        raise ValueError("Table name cannot be empty")
+    
+    # Only allow alphanumeric and underscore
+    if not re.match(r'^[a-zA-Z0-9_]+$', table_name):
+        raise ValueError(f"Invalid table name: {table_name}. Only alphanumeric characters and underscores are allowed.")
+    
+    # Prevent names starting with numbers (DuckDB requirement)
+    if table_name[0].isdigit():
+        raise ValueError(f"Invalid table name: {table_name}. Table names cannot start with a digit.")
+    
+    # Limit length
+    if len(table_name) > 64:
+        raise ValueError(f"Table name too long: {table_name}. Maximum 64 characters.")
+    
+    return table_name
+
+
+def sanitize_column_name(column_name: str) -> str:
+    """
+    Validate and sanitize column name to prevent SQL injection.
+    Only allows alphanumeric characters and underscores.
+    """
+    if not column_name:
+        raise ValueError("Column name cannot be empty")
+    
+    if not re.match(r'^[a-zA-Z0-9_]+$', column_name):
+        raise ValueError(f"Invalid column name: {column_name}. Only alphanumeric characters and underscores are allowed.")
+    
+    return column_name
 
 # --- DUCKDB SETUP ---
 # Create a persistent DuckDB connection with S3 support
@@ -73,6 +111,13 @@ except Exception as e:
 class DataRecord(BaseModel):
     """Single data record to be ingested"""
     data: Dict[str, Any]
+    
+    @validator('data')
+    def validate_data_keys(cls, v):
+        """Validate column names in data"""
+        for key in v.keys():
+            sanitize_column_name(key)
+        return v
 
 
 class DataBatch(BaseModel):
@@ -80,12 +125,32 @@ class DataBatch(BaseModel):
     table_name: str
     records: List[Dict[str, Any]]
     partition_date: Optional[str] = None  # Format: YYYY-MM-DD, defaults to today
+    
+    @validator('table_name')
+    def validate_table_name(cls, v):
+        """Validate table name"""
+        return sanitize_table_name(v)
+    
+    @validator('records')
+    def validate_records(cls, v):
+        """Validate column names in all records"""
+        if not v:
+            raise ValueError("Records list cannot be empty")
+        for record in v:
+            for key in record.keys():
+                sanitize_column_name(key)
+        return v
 
 
 class IcebergTableCreate(BaseModel):
     """Request to create an Iceberg table"""
     table_name: str
     schema: Dict[str, str]  # Column name -> DuckDB type (e.g., {"id": "INTEGER", "name": "VARCHAR"})
+    
+    @validator('table_name')
+    def validate_table_name(cls, v):
+        """Validate table name"""
+        return sanitize_table_name(v)
 
 
 # --- HELPER FUNCTIONS ---
@@ -94,6 +159,9 @@ def get_partition_path(table_name: str, date_str: Optional[str] = None) -> str:
     Generate S3 path with date-based partitioning.
     Format: s3://bucket/table_name/year=YYYY/month=MM/day=DD/
     """
+    # Sanitize table name for path
+    table_name = sanitize_table_name(table_name)
+    
     if date_str:
         try:
             dt = datetime.strptime(date_str, "%Y-%m-%d")
@@ -116,6 +184,9 @@ def ensure_table_exists(table_name: str, sample_record: Dict[str, Any]):
     Ensure a temporary DuckDB table exists for the given data structure.
     Infers schema from the sample record.
     """
+    # Sanitize table name
+    table_name = sanitize_table_name(table_name)
+    
     # Create table from sample if it doesn't exist
     try:
         conn.execute(f"SELECT 1 FROM {table_name} LIMIT 1")
@@ -124,6 +195,9 @@ def ensure_table_exists(table_name: str, sample_record: Dict[str, Any]):
         # Infer column types from the sample
         columns = []
         for key, value in sample_record.items():
+            # Sanitize column name
+            col_name = sanitize_column_name(key)
+            
             if isinstance(value, int):
                 col_type = "INTEGER"
             elif isinstance(value, float):
@@ -132,9 +206,10 @@ def ensure_table_exists(table_name: str, sample_record: Dict[str, Any]):
                 col_type = "BOOLEAN"
             else:
                 col_type = "VARCHAR"
-            columns.append(f"{key} {col_type}")
+            columns.append(f"{col_name} {col_type}")
         
         col_def = ", ".join(columns)
+        # Note: table_name is already sanitized, so safe to use in string interpolation
         conn.execute(f"CREATE TABLE {table_name} ({col_def})")
         print(f"✅ Created temporary table: {table_name} with columns: {col_def}")
 
@@ -174,17 +249,19 @@ def ingest_data(batch: DataBatch):
         if not batch.records:
             raise HTTPException(status_code=400, detail="No records provided")
         
-        table_name = batch.table_name
+        table_name = batch.table_name  # Already validated by Pydantic
         
         # Ensure temp table exists
         ensure_table_exists(table_name, batch.records[0])
         
         # Insert records into temp table using parameterized queries
         # Build the INSERT statement with placeholders
-        columns = list(batch.records[0].keys())
+        # Column names are already validated by Pydantic validator
+        columns = [sanitize_column_name(col) for col in batch.records[0].keys()]
         placeholders = ", ".join(["?" for _ in columns])
         col_names = ", ".join(columns)
         
+        # Note: table_name and col_names are sanitized, safe to use in string interpolation
         insert_sql = f"INSERT INTO {table_name} ({col_names}) VALUES ({placeholders})"
         
         # Insert each record
@@ -240,16 +317,21 @@ def ingest_stream(table_name: str, record: DataRecord):
     ```
     """
     try:
+        # Sanitize table name from query parameter
+        table_name = sanitize_table_name(table_name)
+        
         # Ensure temp table exists
         ensure_table_exists(table_name, record.data)
         
         # Insert single record using parameterized query
-        columns = list(record.data.keys())
+        # Column names are already validated by Pydantic validator
+        columns = [sanitize_column_name(col) for col in record.data.keys()]
         placeholders = ", ".join(["?" for _ in columns])
         col_names = ", ".join(columns)
         
+        # Note: table_name and col_names are sanitized, safe to use in string interpolation
         insert_sql = f"INSERT INTO {table_name} ({col_names}) VALUES ({placeholders})"
-        values = [record.data.get(col) for col in columns]
+        values = [record.data.get(col) for col in record.data.keys()]
         conn.execute(insert_sql, values)
         
         return {
@@ -274,7 +356,10 @@ def flush_table(table_name: str, partition_date: Optional[str] = None):
     ```
     """
     try:
-        # Check if table has data
+        # Sanitize table name from query parameter
+        table_name = sanitize_table_name(table_name)
+        
+        # Check if table has data (table_name is sanitized, safe to use)
         result = conn.execute(f"SELECT COUNT(*) as cnt FROM {table_name}").fetchone()
         count = result[0] if result else 0
         
@@ -285,12 +370,13 @@ def flush_table(table_name: str, partition_date: Optional[str] = None):
                 "record_count": 0
             }
         
-        # Generate partition path
+        # Generate partition path (also sanitizes table_name)
         partition_path = get_partition_path(table_name, partition_date)
         
         # Write to S3
         output_file = f"{partition_path}/data_{datetime.now().strftime('%H%M%S')}.parquet"
         try:
+            # Note: table_name is sanitized, output_file is generated internally, safe to use
             conn.execute(f"""
                 COPY {table_name} TO '{output_file}' (FORMAT PARQUET)
             """)
@@ -301,7 +387,7 @@ def flush_table(table_name: str, partition_date: Optional[str] = None):
             output_file = f"(S3 write unavailable: {str(s3_error)[:100]})"
             s3_write_success = False
         
-        # Clear table after flush
+        # Clear table after flush (table_name is sanitized, safe to use)
         conn.execute(f"DELETE FROM {table_name}")
         
         return {
@@ -342,6 +428,10 @@ def list_tables():
 def get_table_count(table_name: str):
     """Get the count of buffered records for a table"""
     try:
+        # Sanitize table name from path parameter
+        table_name = sanitize_table_name(table_name)
+        
+        # table_name is sanitized, safe to use in query
         result = conn.execute(f"SELECT COUNT(*) as cnt FROM {table_name}").fetchone()
         count = result[0] if result else 0
         
@@ -351,6 +441,9 @@ def get_table_count(table_name: str):
             "buffered_count": count
         }
         
+    except ValueError as ve:
+        # Invalid table name
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         # Table might not exist
         return {

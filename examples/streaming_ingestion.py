@@ -13,7 +13,8 @@ Architecture:
 import json
 import time
 import os
-from datetime import datetime
+import random
+from datetime import datetime, timezone
 from typing import Dict, Any
 
 try:
@@ -42,12 +43,11 @@ def generate_sample_event(user_id: int) -> Dict[str, Any]:
         {"action": "checkout", "page": "/checkout"},
     ]
     
-    import random
     event = random.choice(events)
     
     return {
         "user_id": user_id,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "action": event["action"],
         "page": event["page"],
         "session_id": f"session_{user_id % 10}",
@@ -169,12 +169,18 @@ class IcebergWriter:
         if not events:
             return
         
-        # Build VALUES clause
+        # Build VALUES clause with proper escaping
         values = []
         for event in events:
+            # Escape single quotes by doubling them (SQL standard)
+            user_id = int(event['user_id'])  # Ensure integer
+            timestamp = event['timestamp'].replace("'", "''")
+            action = event['action'].replace("'", "''")
+            page = event['page'].replace("'", "''")
+            session_id = event['session_id'].replace("'", "''")
+            
             values.append(
-                f"({event['user_id']}, '{event['timestamp']}', '{event['action']}', "
-                f"'{event['page']}', '{event['session_id']}')"
+                f"({user_id}, '{timestamp}', '{action}', '{page}', '{session_id}')"
             )
         
         sql = f"INSERT INTO iceberg.public.user_events VALUES {', '.join(values)}"

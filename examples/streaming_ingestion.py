@@ -165,19 +165,35 @@ class IcebergWriter:
             return False
     
     def batch_insert_events(self, events: list):
-        """Insert a batch of events into Iceberg table."""
+        """Insert a batch of events into Iceberg table.
+        
+        Note: This example uses SQL string construction with escaping because it interfaces
+        with a REST API that accepts SQL strings. In production, consider:
+        1. Using the native Iceberg writer API for direct writes
+        2. Using Flink's Iceberg connector for streaming writes
+        3. Validating/sanitizing input data before insertion
+        4. Implementing rate limiting and input validation at the API level
+        
+        For this demo, we:
+        - Validate user_id as integer
+        - Escape single quotes using SQL standard (doubling them)
+        - Control the input data source (generated events only)
+        """
         if not events:
             return
         
-        # Build VALUES clause with proper escaping
+        # Build VALUES clause with proper escaping and validation
         values = []
         for event in events:
+            # Validate and escape values to prevent SQL injection
+            user_id = int(event['user_id'])  # Ensure integer (raises ValueError if invalid)
+            
             # Escape single quotes by doubling them (SQL standard)
-            user_id = int(event['user_id'])  # Ensure integer
-            timestamp = event['timestamp'].replace("'", "''")
-            action = event['action'].replace("'", "''")
-            page = event['page'].replace("'", "''")
-            session_id = event['session_id'].replace("'", "''")
+            # This prevents SQL injection from malicious input
+            timestamp = str(event['timestamp']).replace("'", "''")
+            action = str(event['action']).replace("'", "''")
+            page = str(event['page']).replace("'", "''")
+            session_id = str(event['session_id']).replace("'", "''")
             
             values.append(
                 f"({user_id}, '{timestamp}', '{action}', '{page}', '{session_id}')"
@@ -337,9 +353,11 @@ if __name__ == "__main__":
         if command == "produce":
             try:
                 num_events = int(sys.argv[2]) if len(sys.argv) > 2 else 100
-            except ValueError:
-                print(f"❌ Error: Number of events must be an integer")
+            except ValueError as e:
+                provided_value = sys.argv[2] if len(sys.argv) > 2 else "unknown"
+                print(f"❌ Error: Number of events must be an integer, got '{provided_value}'")
                 print("Usage: python streaming_ingestion.py produce [num_events]")
+                print("Example: python streaming_ingestion.py produce 100")
                 sys.exit(1)
             
             producer = StreamingProducer()
@@ -348,9 +366,11 @@ if __name__ == "__main__":
         elif command == "consume":
             try:
                 max_messages = int(sys.argv[2]) if len(sys.argv) > 2 else 10
-            except ValueError:
-                print(f"❌ Error: Max messages must be an integer")
+            except ValueError as e:
+                provided_value = sys.argv[2] if len(sys.argv) > 2 else "unknown"
+                print(f"❌ Error: Max messages must be an integer, got '{provided_value}'")
                 print("Usage: python streaming_ingestion.py consume [max_messages]")
+                print("Example: python streaming_ingestion.py consume 10")
                 sys.exit(1)
             
             consumer = StreamingConsumer()

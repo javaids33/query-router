@@ -335,12 +335,24 @@ if __name__ == "__main__":
         command = sys.argv[1]
         
         if command == "produce":
-            num_events = int(sys.argv[2]) if len(sys.argv) > 2 else 100
+            try:
+                num_events = int(sys.argv[2]) if len(sys.argv) > 2 else 100
+            except ValueError:
+                print(f"❌ Error: Number of events must be an integer")
+                print("Usage: python streaming_ingestion.py produce [num_events]")
+                sys.exit(1)
+            
             producer = StreamingProducer()
             producer.produce_stream(num_events=num_events)
         
         elif command == "consume":
-            max_messages = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+            try:
+                max_messages = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+            except ValueError:
+                print(f"❌ Error: Max messages must be an integer")
+                print("Usage: python streaming_ingestion.py consume [max_messages]")
+                sys.exit(1)
+            
             consumer = StreamingConsumer()
             consumer.consume_and_display(max_messages=max_messages)
         
@@ -351,10 +363,21 @@ if __name__ == "__main__":
             writer = IcebergWriter()
             writer.create_streaming_table()
         
+        elif command == "demo":
+            # Explicitly handle 'demo' command
+            demo_streaming_pipeline()
+        
         else:
-            print(f"Unknown command: {command}")
+            print(f"❌ Unknown command: {command}")
             print("Usage: python streaming_ingestion.py [produce|consume|query|setup|demo]")
+            print("\nCommands:")
+            print("  produce [N]  - Produce N events to Kafka (default: 100)")
+            print("  consume [N]  - Consume N messages from Kafka (default: 10)")
+            print("  query        - Query streaming data from Iceberg")
+            print("  setup        - Create Iceberg table for streaming events")
+            print("  demo         - Run complete streaming pipeline demo (default)")
+            sys.exit(1)
     
     else:
-        # Run full demo
+        # Run full demo when no arguments provided
         demo_streaming_pipeline()

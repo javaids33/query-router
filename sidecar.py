@@ -28,6 +28,14 @@ S3_BUCKET = os.getenv("S3_BUCKET", "lake-data")
 S3_REGION = os.getenv("S3_REGION", "us-east-1")
 
 # --- SECURITY ---
+# SQL reserved words that should not be used as table names
+SQL_RESERVED_WORDS = {
+    'select', 'insert', 'update', 'delete', 'drop', 'create', 'alter', 'table',
+    'from', 'where', 'join', 'union', 'order', 'group', 'having', 'limit',
+    'offset', 'values', 'set', 'into', 'as', 'on', 'and', 'or', 'not', 'null',
+    'true', 'false', 'case', 'when', 'then', 'else', 'end', 'with', 'by'
+}
+
 def sanitize_table_name(table_name: str) -> str:
     """
     Validate and sanitize table name to prevent SQL injection.
@@ -35,6 +43,13 @@ def sanitize_table_name(table_name: str) -> str:
     """
     if not table_name:
         raise ValueError("Table name cannot be empty")
+    
+    # Convert to lowercase for comparison
+    table_lower = table_name.lower()
+    
+    # Check against SQL reserved words
+    if table_lower in SQL_RESERVED_WORDS:
+        raise ValueError(f"Invalid table name: {table_name}. Cannot use SQL reserved words.")
     
     # Only allow alphanumeric and underscore
     if not re.match(r'^[a-zA-Z0-9_]+$', table_name):
@@ -58,6 +73,13 @@ def sanitize_column_name(column_name: str) -> str:
     """
     if not column_name:
         raise ValueError("Column name cannot be empty")
+    
+    # Convert to lowercase for comparison
+    col_lower = column_name.lower()
+    
+    # Check against SQL reserved words
+    if col_lower in SQL_RESERVED_WORDS:
+        raise ValueError(f"Invalid column name: {column_name}. Cannot use SQL reserved words.")
     
     if not re.match(r'^[a-zA-Z0-9_]+$', column_name):
         raise ValueError(f"Invalid column name: {column_name}. Only alphanumeric characters and underscores are allowed.")

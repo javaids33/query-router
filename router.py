@@ -117,7 +117,7 @@ def run_clickhouse(sql):
              # So for the SQL rewrite, we MUST assume the CH container's view of the world.
              # We'll hardcode 'minio' here for the *rewrite* text, assuming CH is always in the mesh or can resolve minio.
              # If CH is external, this rewrite logic would need config.
-             sql = sql.replace("users", "s3('http://minio:9000/lake-data/data/users/*.parquet', 'admin', 'password', 'Parquet')")
+             sql = sql.replace("users", "s3('http://minio:9000/lake-data/public/users-*/data/*.parquet', 'admin', 'password', 'Parquet')")
         
         res = client.query(sql)
         return {"data": res.result_rows, "columns": res.column_names}

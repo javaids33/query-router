@@ -27,30 +27,40 @@ The router automatically analyzes incoming SQL queries and routes them to the mo
 ┌─────────────────────────────────────────────────────────┐
 │                    Client Application                    │
 │                   (Dashboard/API)                        │
-└────────────────────┬────────────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────────────┐
-│                  Query Router (FastAPI)                  │
-│  - SQL Parsing (SQLGlot)                                │
-│  - Routing Logic                                        │
-│  - DuckDB Integration                                   │
-└─────┬───────┬──────────┬────────────┬──────────────────┘
-      │       │          │            │
-      ▼       ▼          ▼            ▼
-  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────────┐
-  │Postgres│ │ClickH. │ │ Trino  │ │  DuckDB    │
-  │ (OLTP) │ │ (Speed)│ │ (Join) │ │ (Ad-hoc)   │
-  └────────┘ └───┬────┘ └───┬────┘ └─────┬──────┘
-                 │          │            │
-                 └──────────┴────────────┘
-                            │
-                            ▼
-                 ┌─────────────────────┐
-                 │  MinIO (S3 Storage)  │
-                 │  + Nessie Catalog    │
-                 │  (Iceberg Tables)    │
-                 └─────────────────────┘
+└────────────────────┬───────────┬────────────────────────┘
+                     │           │
+                     │           │ POST /ingest (data)
+                     │           │
+                     ▼           ▼
+┌─────────────────────────────┐  ┌──────────────────────┐
+│   Query Router (FastAPI)    │  │ DuckDB S3 Sidecar 🆕 │
+│ - SQL Parsing (SQLGlot)     │  │ - Data Ingestion     │
+│ - Routing Logic             │  │ - S3 Writing         │
+│ - DuckDB Integration        │  │ - Date Partitioning  │
+└─────┬───────┬────────┬──────┘  └──────────┬───────────┘
+      │       │        │                    │
+      ▼       ▼        ▼                    │
+  ┌────────┐ ┌──────┐ ┌──────┐             │
+  │Postgres│ │ClickH│ │Trino │             │
+  │ (OLTP) │ │(Speed)│ │(Join)│             │
+  └────────┘ └───┬──┘ └───┬──┘             │
+                 │        │                │
+                 └────────┴────────────────┘
+                          │
+                          ▼
+              ┌─────────────────────────┐
+              │  MinIO (S3 Storage)      │
+              │  + Nessie Catalog        │
+              │  (Iceberg Tables)        │
+              │                          │
+              │  lake-data/              │
+              │  └─ data/                │
+              │     └─ {table}/          │
+              │        └─ year=YYYY/     │
+              │           └─ month=MM/   │
+              │              └─ day=DD/  │
+              │                 └─ *.parquet │
+              └─────────────────────────┘
 ```
 
 ### Streaming Ingestion Architecture
@@ -138,6 +148,12 @@ The router automatically analyzes incoming SQL queries and routes them to the mo
    - Version control for data
    - REST catalog endpoint for metadata
 
+8. **DuckDB S3 Sidecar (`sidecar.py`)** 🆕
+   - Dedicated service for data ingestion to S3
+   - Automatic date-based partitioning (YYYY/MM/DD)
+   - FastAPI endpoints for batch and streaming data
+   - Direct Parquet writing to S3/Iceberg
+   - Easy integration for any application in the cluster
 ### Streaming Components
 
 8. **Apache Kafka**
@@ -193,6 +209,7 @@ This starts:
 - MinIO (port 9000, 9001)
 - Nessie (port 19120)
 - Query Router (port 8000)
+- **DuckDB S3 Sidecar (port 8001)** 🆕
 - **Zookeeper (port 2181)** - Kafka coordination
 - **Kafka (port 9092, 29092)** - Message streaming
 - **Flink JobManager (port 8081)** - Stream processing UI
@@ -204,8 +221,11 @@ This starts:
 # Check service health
 docker compose ps
 
-# View logs
+# View router logs
 docker compose logs -f router
+
+# View sidecar logs
+docker compose logs -f duckdb-sidecar
 ```
 
 ### 4. Initialize Data (Optional)
@@ -263,6 +283,148 @@ curl -X POST http://localhost:8000/query \
     "force_engine": "clickhouse"
   }'
 ```
+
+### DuckDB S3 Sidecar - Data Ingestion 🆕
+
+The DuckDB sidecar provides a simple API for pushing data directly to S3 with automatic date-based partitioning.
+
+#### Why Use the Sidecar?
+
+- **Easy S3 Integration**: No need to configure S3 in your application
+- **Automatic Partitioning**: Data is organized by date (year/month/day)
+- **Direct to Iceberg**: Data flows directly to your data lake
+- **Flexible Ingestion**: Batch or streaming modes
+- **Format Handling**: Automatic conversion to Parquet
+
+#### Quick Start
+
+```bash
+# Check sidecar health
+curl http://localhost:8001/health
+
+# Ingest batch data
+curl -X POST http://localhost:8001/ingest \
+  -H "Content-Type: application/json" \
+  -d '{
+    "table_name": "events",
+    "records": [
+      {"user_id": 1, "event": "login", "timestamp": "2025-12-20T10:00:00"},
+      {"user_id": 2, "event": "purchase", "timestamp": "2025-12-20T10:05:00"}
+    ],
+    "partition_date": "2025-12-20"
+  }'
+```
+
+Response:
+```json
+{
+  "status": "success",
+  "s3_path": "s3://lake-data/data/events/year=2025/month=12/day=20/data_100530.parquet",
+  "record_count": 2,
+  "partition_date": "2025-12-20"
+}
+```
+
+#### Ingestion Patterns
+
+**1. Batch Ingestion (Best for bulk transfers)**
+
+```python
+import requests
+
+data = {
+    "table_name": "sales",
+    "records": [
+        {"id": 1, "product": "Widget", "amount": 100},
+        {"id": 2, "product": "Gadget", "amount": 200}
+    ],
+    "partition_date": "2025-12-20"  # Optional
+}
+
+response = requests.post("http://localhost:8001/ingest", json=data)
+print(response.json())
+```
+
+**2. Streaming Ingestion (Best for real-time data)**
+
+```python
+import requests
+
+# Stream individual records
+for record in event_stream:
+    requests.post(
+        "http://localhost:8001/ingest/stream?table_name=events",
+        json={"data": record}
+    )
+
+# Flush buffered records to S3
+requests.post("http://localhost:8001/flush?table_name=events")
+```
+
+**3. From Application Pod to Sidecar**
+
+In your application (running in the same Docker network):
+
+```python
+import requests
+
+# Use the service name from docker-compose
+SIDECAR_URL = "http://duckdb-sidecar:8001"
+
+def send_to_data_lake(data):
+    """Push data from your app to the data lake"""
+    response = requests.post(
+        f"{SIDECAR_URL}/ingest",
+        json={
+            "table_name": "app_data",
+            "records": data
+        }
+    )
+    return response.json()
+
+# In your application logic
+events = fetch_app_events()
+result = send_to_data_lake(events)
+print(f"Sent {result['record_count']} records to S3")
+```
+
+#### Data Flow Pattern
+
+```
+Your App → POST /ingest → DuckDB Sidecar → S3/Iceberg
+   │              │              │              │
+   │              │              │              └→ Parquet files
+   │              │              └→ Date partitioning
+   │              └→ JSON data
+   └→ Any pod in cluster
+
+Result: s3://lake-data/data/{table}/year=YYYY/month=MM/day=DD/data_*.parquet
+```
+
+#### Run the Examples
+
+```bash
+# Run comprehensive examples
+python example_sidecar_usage.py
+```
+
+This demonstrates:
+- Batch ingestion with date partitioning
+- Streaming with manual flush
+- Historical data loading
+- Multi-table management
+
+#### API Documentation
+
+Access interactive API docs at: http://localhost:8001/docs
+
+Available endpoints:
+- `GET /health` - Health check
+- `POST /ingest` - Batch data ingestion
+- `POST /ingest/stream` - Stream single records
+- `POST /flush` - Flush buffered data to S3
+- `GET /tables` - List all temporary tables
+- `GET /table/{name}/count` - Get buffered record count
 
 ### Dashboard UI
 

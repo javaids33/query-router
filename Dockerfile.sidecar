@@ -1,0 +1,31 @@
+FROM python:3.9-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+# Note: Using --trusted-host flags for environments with SSL issues
+RUN pip install --no-cache-dir \
+    --trusted-host pypi.org \
+    --trusted-host files.pythonhosted.org \
+    fastapi \
+    uvicorn \
+    duckdb==1.1.3 \
+    pydantic \
+    fsspec \
+    s3fs
+
+# Set working directory
+WORKDIR /app
+
+# Copy the sidecar service
+COPY sidecar.py .
+
+# Expose the API port
+EXPOSE 8001
+
+# Run the sidecar service
+CMD ["uvicorn", "sidecar:app", "--host", "0.0.0.0", "--port", "8001"]

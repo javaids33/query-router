@@ -10,6 +10,9 @@ def setup_data():
     conn = connect(host="localhost", port=8080, user="admin", catalog="iceberg", schema="public")
     cur = conn.cursor()
     
+    print("📂 Ensuring schema 'public' exists...")
+    cur.execute("CREATE SCHEMA IF NOT EXISTS iceberg.public WITH (location = 's3://lake-data/data/')")
+    
     print("🗑️ Dropping table users...")
     cur.execute("DROP TABLE IF EXISTS users")
     

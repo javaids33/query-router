@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 # Configuration
 ROUTER_URL = "http://localhost:8000"
 
-st.set_page_config(page_title="Query Router: The Data Garage", page_icon="🏎️", layout="wide")
+st.set_page_config(page_title="Open Data Garage", page_icon="🏎️", layout="wide")
 
 # Custom CSS for "Premium" feel
 st.markdown("""
@@ -20,7 +20,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🏎️ The Smart Data Garage")
+st.title("🏎️ Open Data Garage")
 st.markdown("### A Story of Modern Data Engineering")
 
 # --- SIDEBAR (Mechanic's Bay) ---
@@ -247,3 +247,43 @@ with tab3:
     c3.metric("Data Lake Protocol", "Iceberg/S3")
     
     st.image("https://mermaid.ink/img/pako:eNp1kU1PwzAMhv9K5HMToT1w4zFpEiYQ0w44cNiNqW-1kS05TtV2Q_x3nLXtABJcnPj1K_tJ54y1JkMTWvF9qZE9-V7yAnle4iXyIi9Xm4IsFiv0tF6hV6tN9nS12eQFrfBqW6A1WpHn-QJ56xV6s94m_Gq1S9C6-9t1jtaoI8_zNfK2K_RutUvQhvvtOkfr1G3kRb5B3naF3q12Cdp0v13naL068jwvkLddoferXYI23W_XOdqgjjzPN8jbrtD71S5Bm-636xztUEee5xvkbVfo_WqXoM3_367zP9r8gTbkef6OvO0KvV_tErT5frvO0eYbeV68I2-7Qu9XuwRtud-uc7RFHXleLJC3XaH3ql2Cttxvt9l7y79o8wN5Xq6Qt12h96tdgrbcb9c52oqM_N-v0PtV_t9b7rfrDK1RR74v3pC_AbVifq8", caption="Architecture")
+
+# --- Ingestion Tab ---
+with st.expander("🛠️ Metadata & Ingestion (Beta)"):
+    st.write("Upload generic data to the Garage (Iceberg/S3).")
+    uploaded_file = st.file_uploader("Choose a CSV", type="csv")
+    table_name = st.text_input("Target Table Name", "my_new_data")
+    
+    if uploaded_file is not None and st.button("Ingest Data"):
+        with st.spinner("Ingesting into Data Lake..."):
+            # Save temp file
+            import os
+            temp_path = f"temp_{uploaded_file.name}"
+            with open(temp_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            
+            # Call Router
+            # Note: In a real docker setup, 'temp_path' on dashboard container isn't visible to router container
+            # unless shared volume. For this "Learning/Demo" setup where we might run `python router.py` locally, it works.
+            # If running in Docker compose, this needs a shared volume mount /tmp/shared.
+            # We will assume LOCAL execution context for the "Verification" phase as per user behavior.
+            
+            # Send file path if local, or we needs to post the FILE CONTENT if remote.
+            # For simplicity in this demo: We will POST the content if small, or use path if local.
+            # Let's assume we are running locally for verification.
+            
+            try:
+                # payload = {"file_path": os.path.abspath(temp_path), "table_name": table_name}
+                # r = requests.post(f"{ROUTER_URL}/ingest", params=payload)
+                
+                # Better: Use the requests file upload to router if we wanted to be robust, 
+                # but our router takes a path. Let's act like we are local.
+                path = os.path.abspath(temp_path)
+                r = requests.post(f"{ROUTER_URL}/ingest", params={"file_path": path, "table_name": table_name})
+                
+                if r.status_code == 200 and "error" not in r.json():
+                    st.success(f"Ingested! Data now in S3: {r.json().get('path')}")
+                else:
+                    st.error(f"Ingestion failed: {r.text}")
+            except Exception as e:
+                st.error(f"Error: {e}")

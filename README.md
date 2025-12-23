@@ -1,17 +1,19 @@
-# 🏎️ SQL Query Router
+# 🏎️ Open Data Garage
+>
+> A "GitHub Ready" Smart Query Router & Data Product.
 
-An intelligent SQL query router that automatically directs queries to the optimal database engine based on query characteristics and workload patterns. **Now with streaming ingestion support via Kafka + Flink!**
+**Open Data Garage** is a modular Query Router that intelligently routes SQL queries to the best engine for the job (Postgres, ClickHouse, Trino, or DuckDB), all while maintaining a centralized "Data Lake" feel using Nessie and Iceberg.
 
 ## 🎯 Overview
 
-The Query Router is a FastAPI-based application that implements intelligent query routing across multiple database engines:
+**Open Data Garage** implements intelligent query routing across multiple database engines:
 
 - **PostgreSQL** - OLTP workloads and transactional queries
 - **ClickHouse** - Fast analytical aggregations
 - **Trino** - Complex joins and federated queries
 - **DuckDB** - Ad-hoc analytics and Iceberg table access
 
-Additionally, the platform supports **streaming data ingestion**:
+Additionally, the **Open Data Garage** supports **streaming data ingestion**:
 
 - **Kafka** - Distributed message streaming platform
 - **Flink** - Real-time stream processing engine
@@ -23,7 +25,7 @@ The router automatically analyzes incoming SQL queries and routes them to the mo
 
 ### Batch + OLAP Architecture
 
-```
+```mermaid
 ┌─────────────────────────────────────────────────────────┐
 │                    Client Application                    │
 │                   (Dashboard/API)                        │
@@ -55,7 +57,7 @@ The router automatically analyzes incoming SQL queries and routes them to the mo
 
 ### Streaming Ingestion Architecture
 
-```
+```mermaid
 ┌──────────────────────────────────────────────────────────┐
 │                   Data Sources                            │
 │          (Applications, IoT, Logs, Events)               │
@@ -91,7 +93,7 @@ The router automatically analyzes incoming SQL queries and routes them to the mo
     └────────┘              └────────┘
 ```
 
-**Complete Flow:** 
+**Complete Flow:**
 `Events → Kafka → Flink → Iceberg/Nessie → MinIO → Query Engines`
 
 ## 🚀 Components
@@ -140,20 +142,20 @@ The router automatically analyzes incoming SQL queries and routes them to the mo
 
 ### Streaming Components
 
-8. **Apache Kafka**
+1. **Apache Kafka**
    - Distributed message streaming platform
    - High-throughput event ingestion
    - Pub-sub messaging for real-time data
    - Topic-based data organization
 
-9. **Apache Flink**
+2. **Apache Flink**
    - Stream processing engine
    - Real-time ETL and transformations
    - Stateful stream processing
    - Exactly-once semantics
    - Direct integration with Iceberg
 
-10. **Zookeeper**
+3. **Zookeeper**
     - Coordination service for Kafka
     - Manages Kafka cluster metadata
     - Leader election and configuration
@@ -187,6 +189,7 @@ docker compose up -d
 ```
 
 This starts:
+
 - PostgreSQL (port 5432)
 - ClickHouse (port 8123, 9009)
 - Trino (port 8080)
@@ -228,6 +231,7 @@ curl http://localhost:8000/health
 ```
 
 Response:
+
 ```json
 {
   "status": "alive"
@@ -245,6 +249,7 @@ curl -X POST http://localhost:8000/query \
 ```
 
 Response:
+
 ```json
 {
   "data": [{"id": 1, "name": "Alice", "role": "Engineer"}],
@@ -276,9 +281,10 @@ pip install streamlit requests pandas plotly
 streamlit run dashboard.py
 ```
 
-Access at: http://localhost:8501
+Access at: <http://localhost:8501>
 
 Features:
+
 - Live data feed from PostgreSQL
 - Intelligent routing demonstration
 - Performance comparison between engines
@@ -289,33 +295,39 @@ Features:
 The router analyzes SQL queries and applies these rules:
 
 ### 1. **PostgreSQL** (OLTP Engine)
+
 - Point lookups: `WHERE id = X`
 - Write operations: INSERT, UPDATE, DELETE, CREATE
 - Transactional consistency required
 
 **Example:**
+
 ```sql
 SELECT * FROM users WHERE id = 1
 INSERT INTO users (name, role) VALUES ('Charlie', 'Analyst')
 ```
 
 ### 2. **ClickHouse** (Speed Engine)
+
 - Aggregation queries without JOINs
 - COUNT, SUM, AVG, MIN, MAX operations
 - Single-table analytics
 
 **Example:**
+
 ```sql
 SELECT COUNT(*) FROM users
 SELECT role, COUNT(*) FROM users GROUP BY role
 ```
 
 ### 3. **Trino** (Join Engine)
+
 - Queries with JOIN operations
 - Multi-table queries
 - Complex analytical workloads
 
 **Example:**
+
 ```sql
 SELECT a.name, b.role 
 FROM users a 
@@ -323,12 +335,14 @@ JOIN users b ON a.id = b.id
 ```
 
 ### 4. **DuckDB** (Fallback/Ad-hoc Engine)
+
 - Simple SELECT queries
 - Ad-hoc analysis
 - Iceberg table scanning
 - Queries that don't match other patterns
 
 **Example:**
+
 ```sql
 SELECT * FROM users
 SELECT name FROM users LIMIT 10
@@ -364,6 +378,7 @@ python examples/streaming_ingestion.py
 ```
 
 This demo:
+
 1. ✅ Verifies Nessie and Kafka connectivity
 2. ✅ Creates Iceberg table for streaming events
 3. ✅ Produces sample events to Kafka
@@ -404,10 +419,10 @@ This demo:
 
 ### Access Streaming UIs
 
-- **Flink Dashboard**: http://localhost:8081
+- **Flink Dashboard**: <http://localhost:8081>
 - **Kafka Console**: Use CLI tools in the Kafka container
-- **MinIO Console**: http://localhost:9001 (view data files)
-- **Nessie API**: http://localhost:19120/api/v1 (catalog versioning)
+- **MinIO Console**: <http://localhost:9001> (view data files)
+- **Nessie API**: <http://localhost:19120/api/v1> (catalog versioning)
 
 For detailed streaming documentation, examples, and configuration, see **[STREAMING.md](STREAMING.md)**.
 
@@ -420,6 +435,7 @@ python test_connections.py
 ```
 
 This tests:
+
 - Router health endpoint
 - Individual engine connectivity
 - ETL simulation (Postgres → Iceberg)
@@ -432,6 +448,7 @@ python validation.py
 ```
 
 Performs:
+
 - Router connectivity check
 - Engine connectivity for all databases
 - Data existence verification
@@ -444,6 +461,7 @@ python verify_data.py
 ```
 
 Checks:
+
 - Nessie catalog accessibility
 - Iceberg table data
 - Snapshot information
@@ -498,6 +516,7 @@ query-router/
 ### Common Issues
 
 1. **Services not starting**
+
    ```bash
    docker compose down -v
    docker compose up -d
@@ -526,7 +545,7 @@ query-router/
    - Test connectivity: `docker compose exec kafka kafka-broker-api-versions --bootstrap-server localhost:9092`
 
 7. **Flink job issues**
-   - Access Flink UI: http://localhost:8081
+   - Access Flink UI: <http://localhost:8081>
    - Check logs: `docker compose logs flink-jobmanager`
 
 ## 🔒 Security Notes
@@ -542,6 +561,7 @@ query-router/
 ## 📚 Additional Resources
 
 ### Core Technologies
+
 - [DuckDB Documentation](https://duckdb.org/docs/)
 - [Trino Documentation](https://trino.io/docs/current/)
 - [ClickHouse Documentation](https://clickhouse.com/docs/)
@@ -549,12 +569,14 @@ query-router/
 - [Project Nessie](https://projectnessie.org/)
 
 ### Streaming Technologies
+
 - [Apache Kafka Documentation](https://kafka.apache.org/documentation/)
 - [Apache Flink Documentation](https://nightlies.apache.org/flink/flink-docs-release-1.18/)
 - [Flink + Iceberg Integration](https://iceberg.apache.org/docs/latest/flink/)
 - [Kafka Streams](https://kafka.apache.org/documentation/streams/)
 
 ### Architecture Patterns
+
 - [Streaming Data Pipelines](STREAMING.md)
 - [Performance Benchmarks](BENCHMARK.md)
 - [Lakehouse Architecture](https://www.databricks.com/glossary/data-lakehouse)
@@ -562,6 +584,7 @@ query-router/
 ## 🤝 Contributing
 
 Contributions are welcome! Please:
+
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
@@ -578,6 +601,7 @@ Contributions are welcome! Please:
 ## 🙏 Acknowledgments
 
 This project integrates multiple open-source technologies:
+
 - FastAPI for the API framework
 - SQLGlot for SQL parsing
 - DuckDB for embedded analytics
